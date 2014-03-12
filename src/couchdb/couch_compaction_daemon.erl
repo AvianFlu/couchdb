@@ -299,22 +299,13 @@ can_db_compact(#config{db_frag = Threshold} = Config, Db) ->
            [Db#db.name, Frag, SpaceRequired, Free]),
         case check_space(Config#config.db_space, Free) of
         true ->
-            true;
+            check_compact_space(Db#db.name, SpaceRequired, Free);
         false ->
             case check_frag(Threshold, Frag) of
             false ->
                 false;
             true ->
-                case Free >= SpaceRequired of
-                true ->
-                    true;
-                false ->
-                    ?LOG_WARN("Compaction daemon - skipping database `~s` "
-                        "compaction: the estimated necessary disk space is about ~p"
-                        " bytes but the currently available disk space is ~p bytes.",
-                       [Db#db.name, SpaceRequired, Free]),
-                    false
-                end
+                check_compact_space(Db#db.name, SpaceRequired, Free)
             end
         end
     end.
@@ -336,26 +327,41 @@ can_view_compact(Config, DbName, GroupId, GroupInfo) ->
                 [GroupId, DbName, Frag, SpaceRequired, Free]),
             case check_space(Config#config.view_space, Free) of
             true ->
-                true;
+                check_compact_space(GroupId, DbName, SpaceRequired, Free);
             false ->
                 case check_frag(Config#config.view_frag, Frag) of
                 false ->
                     false;
                 true ->
-                    case Free >= SpaceRequired of
-                    true ->
-                        true;
-                    false ->
-                        ?LOG_WARN("Compaction daemon - skipping view group `~s` "
-                            "compaction (database `~s`): the estimated necessary "
-                            "disk space is about ~p bytes but the currently available"
-                            " disk space is ~p bytes.",
-                            [GroupId, DbName, SpaceRequired, Free]),
-                        false
-                    end
+                    check_compact_space(GroupId, DbName, SpaceRequired, Free)
                 end
             end
         end
+    end.
+
+
+check_compact_space(DbName, SpaceRequired, Free) ->
+    case Free >= SpaceRequired of
+    true ->
+        true;
+    false ->
+        ?LOG_WARN("Compaction daemon - skipping database `~s` "
+            "compaction: the estimated necessary disk space is about ~p"
+            " bytes but the currently available disk space is ~p bytes.",
+           [DbName, SpaceRequired, Free]),
+        false
+    end.
+check_compact_space(GroupId, DbName, SpaceRequired, Free) ->
+    case Free >= SpaceRequired of
+    true ->
+        true;
+    false ->
+        ?LOG_WARN("Compaction daemon - skipping view group `~s` "
+            "compaction (database `~s`): the estimated necessary "
+            "disk space is about ~p bytes but the currently available"
+            " disk space is ~p bytes.",
+            [GroupId, DbName, SpaceRequired, Free]),
+        false
     end.
 
 
