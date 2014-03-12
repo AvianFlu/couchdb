@@ -31,6 +31,8 @@
 -record(config, {
     db_frag = nil,
     view_frag = nil,
+    db_space = nil,
+    view_space = nil,
     period = nil,
     cancel = false,
     parallel_view_compact = false
@@ -291,22 +293,28 @@ can_db_compact(#config{db_frag = Threshold} = Config, Db) ->
     true ->
         {ok, DbInfo} = couch_db:get_db_info(Db),
         {Frag, SpaceRequired} = frag(DbInfo),
+        Free = free_space(couch_config:get("couchdb", "database_dir")),
         ?LOG_DEBUG("Fragmentation for database `~s` is ~p%, estimated space for"
-           " compaction is ~p bytes.", [Db#db.name, Frag, SpaceRequired]),
-        case check_frag(Threshold, Frag) of
-        false ->
-            false;
+           " compaction is ~p bytes, free space remaining is ~p bytes.",
+           [Db#db.name, Frag, SpaceRequired, Free]),
+        case check_space(Config#config.db_space, Free) of
         true ->
-            Free = free_space(couch_config:get("couchdb", "database_dir")),
-            case Free >= SpaceRequired of
-            true ->
-                true;
+            true;
+        false ->
+            case check_frag(Threshold, Frag) of
             false ->
-                ?LOG_WARN("Compaction daemon - skipping database `~s` "
-                    "compaction: the estimated necessary disk space is about ~p"
-                    " bytes but the currently available disk space is ~p bytes.",
-                   [Db#db.name, SpaceRequired, Free]),
-                false
+                false;
+            true ->
+                case Free >= SpaceRequired of
+                true ->
+                    true;
+                false ->
+                    ?LOG_WARN("Compaction daemon - skipping database `~s` "
+                        "compaction: the estimated necessary disk space is about ~p"
+                        " bytes but the currently available disk space is ~p bytes.",
+                       [Db#db.name, SpaceRequired, Free]),
+                    false
+                end
             end
         end
     end.
@@ -321,24 +329,30 @@ can_view_compact(Config, DbName, GroupId, GroupInfo) ->
             false;
         false ->
             {Frag, SpaceRequired} = frag(GroupInfo),
+            Free = free_space(couch_index_util:root_dir()),
             ?LOG_DEBUG("Fragmentation for view group `~s` (database `~s`) is "
-                "~p%, estimated space for compaction is ~p bytes.",
-                [GroupId, DbName, Frag, SpaceRequired]),
-            case check_frag(Config#config.view_frag, Frag) of
-            false ->
-                false;
+                "~p%, estimated space for compaction is ~p bytes,"
+                "free space remaining is ~p bytes.",
+                [GroupId, DbName, Frag, SpaceRequired, Free]),
+            case check_space(Config#config.view_space, Free) of
             true ->
-                Free = free_space(couch_index_util:root_dir()),
-                case Free >= SpaceRequired of
-                true ->
-                    true;
+                true;
+            false ->
+                case check_frag(Config#config.view_frag, Frag) of
                 false ->
-                    ?LOG_WARN("Compaction daemon - skipping view group `~s` "
-                        "compaction (database `~s`): the estimated necessary "
-                        "disk space is about ~p bytes but the currently available"
-                        " disk space is ~p bytes.",
-                        [GroupId, DbName, SpaceRequired, Free]),
-                    false
+                    false;
+                true ->
+                    case Free >= SpaceRequired of
+                    true ->
+                        true;
+                    false ->
+                        ?LOG_WARN("Compaction daemon - skipping view group `~s` "
+                            "compaction (database `~s`): the estimated necessary "
+                            "disk space is about ~p bytes but the currently available"
+                            " disk space is ~p bytes.",
+                            [GroupId, DbName, SpaceRequired, Free]),
+                        false
+                    end
                 end
             end
         end
@@ -361,6 +375,12 @@ check_frag(nil, _) ->
     true;
 check_frag(Threshold, Frag) ->
     Frag >= Threshold.
+
+
+check_space(nil, _) ->
+    false;
+check_space(Threshold, Space) ->
+    Space =< Threshold.
 
 
 frag(Props) ->
